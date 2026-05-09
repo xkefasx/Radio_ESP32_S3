@@ -1,0 +1,340 @@
+# .clinerules - Radio_ESP32_S3
+
+## 🚫 ZASADY PODSTAWOWE
+
+- **Nigdy nie kompiluj i nie wgrywaj samodzielnie projektu bez wyraźnej zgody!**
+- **Nie wykonuj komend `pio run`, `pio upload`, `pio test` ani żadnych innych komend PlatformIO bez zgody.**
+- Język projektu: **C/C++** (Arduino framework na ESP32-S3)
+- PlatformIO jako narzędzie build system
+- Git - commituj tylko po wyraźnej prośbie
+ - Git - commituj tylko po wyraźnej prośbie
+ - **Tylko użytkownik może kompilować i wgrywać projekt** (wszystkie kompilacje i uploady muszą być zatwierdzone przez Ciebie)
+
+## 📁 STRUKTURA PROJEKTU
+
+```
+Radio_ESP32_S3/
+├── include/          # Wszystkie nagłówki (config + logika)
+│   ├── config.h      # Piny, stałe, WiFi, API, kolory, enums
+│   ├── wifi_logic.h  # Zarządzanie WiFi (connect/reconnect)
+│   ├── radio_logic.h # Audio I2S, playlisty, UI radia, enkoder jasności
+│   ├── weather_logic.h # Pobieranie/wyświetlanie pogody (Open-Meteo)
+│   └── logger.h      # System logowania, telemetria, ekran logów
+├── src/
+│   └── main.cpp      # Setup, loop, enkoder, dotyk, renderowanie UI
+├── lib/              # Biblioteki zewnętrzne (rzadko modyfikowane)
+├── test/             # Testy (obecnie puste)
+├── platformio.ini    # Konfiguracja build + biblioteki
+├── DEVELOPER_MEMORY.md  # Dokumentacja techniczna projektu
+├── PINOUT_ESP32_S3.txt  # Schemat pinów
+├── STREAMS_GUIDE.md     # Jak pozyskiwać adresy strumieni
+└── .clinerules          # Ten plik - reguły dla asystenta
+```
+
+## 🔧 KONFIGURACJA SPRZĘTU (ESP32-S3 N16R8)
+
+### MCU
+- **Board:** ESP32-S3-DevKitC-1 (N16R8: 16MB Flash QIO, 8MB PSRAM OPI)
+- **CPU:** 240MHz, dual-core Xtensa LX7
+- **Framework:** Arduino (`espressif32 @ 6.8.0`)
+- **C++ Standard:** gnu++17
+
+### Pinout
+
+| Funkcja | GPIO | Uwagi |
+|---------|------|-------|
+| **TFT ILI9341** | | |
+| TFT_BL | 4 | Podświetlenie (PWM LEDC) |
+| TFT_RST | 9 | Reset |
+| TFT_CS | 10 | Chip Select |
+| TFT_MOSI | 11 | SPI MOSI |
+| TFT_SCK | 12 | SPI Clock |
+| TFT_MISO | 13 | SPI MISO |
+| TFT_DC | 14 | Data/Command |
+| **Dotyk XPT2046** | | |
+| TOUCH_CS | 5 | Chip Select |
+| TOUCH_IRQ | 6 | Przerwanie |
+| **Audio I2S (MAX98357A)** | | |
+| I2S_LRC | 15 | Word Select |
+| I2S_BCLK | 16 | Bit Clock |
+| I2S_DOUT | 17 | Data Out |
+| **Enkoder EC11 #1 (górny)** | | Głośność + zmiana trybu (przycisk) |
+| ENC1_S1 | 40 | Kanał A (ISR) |
+| ENC1_S2 | 41 | Kanał B (ISR) - po kolei z S1 i KEY |
+| ENC1_KEY | 42 | Przycisk (tryb switch) |
+| **Enkoder EC11 #2 (dolny)** | | Nawigacja menu (active) |
+| ENC2_S1 | 38 | Kanał A (ISR) |
+| ENC2_S2 | 39 | Kanał B (ISR) - all pins on same side |
+| ENC2_KEY | 48 | Przycisk (short/long press) |
+| **UART (USB)** | | |
+| UART TX | 43 | Serial output |
+| UART RX | 44 | Serial input |
+
+### ⚠️ PSRAM - ZAJĘTE PINY (NIE MOŻNA UŻYWAĆ!)
+
+Dla **WROOM-1 N16R8** (8MB Octal SPI PSRAM), piny **GPIO35, GPIO36, GPIO37** są wewnętrznie połączone z PSRAM i **nie mogą być używane jako wejścia/wyjścia GPIO**:
+
+| Pin | Funkcja wewnętrzna | Konsekwencja użycia |
+|-----|-------------------|---------------------|
+| **GPIO35** | SPIIO6 (SPID/FSPID) | **Boot loop / crash** |
+| **GPIO36** | SPIIO7 (FSPICLK) | **Boot loop / crash** |
+| **GPIO37** | SPIDQS (FSPIQ) | **Boot loop / crash** |
+
+**NIGDY nie używaj GPIO35-37 jako:**
+- Wejść enkodera (S1/S2)
+- Przycisków
+- Wyjść cyfrowych
+- Czujników
+
+**Poprawna konfiguracja enkoderów:**
+- ENC1: S1=GPIO40 (OK), S2=GPIO41 (OK - po kolei), KEY=GPIO42 (OK)
+- ENC2: S1=GPIO21 (OK), S2=GPIO**8** (OK - TOUCH8), KEY=GPIO48 (OK)
+
+### Build Flags (platformio.ini)
+- `-std=gnu++17` - standard C++
+- `-DBOARD_HAS_PSRAM` - włącza PSRAM
+- `-mfix-esp32-psram-cache-issue` - fix dla cache PSRAM
+- `-DCORE_DEBUG_LEVEL=3` - verbose debug
+- `-O2` - optymalizacja wydajności
+- `-DCONFIG_ARDUINO_ISR_IRAM` - ISR w IRAM
+- `-DCONFIG_LWIP_TCP_WND_DEFAULT=32768` - zwiększone okno TCP
+
+### Pamięć
+- **PSRAM:** 8MB OPI, wymagany do bufora audio (1.5MB alokowane)
+- **Flash:** 16MB QIO, partycje default_16MB.csv
+- **Stack Audio Task:** 40KB na rdzeniu 0
+
+## 🏗 ARCHITEKTURA APLIKACJI (Dual-Core)
+
+### Rdzeń 1 (Core 1) - Główna pętla `loop()` - UI + Sterowanie
+- **Odpowiedzialność:** GUI (GFX), dotyk (XPT2046), logika pogody, WiFi, enkoder
+- **Plik:** `src/main.cpp` (funkcja `setup()` i `loop()`)
+- **Priorytet domyślny:** 1
+- **Watchdog:** Subskrybowany, resetowany w każdej iteracji loop()
+
+### Rdzeń 0 (Core 0) - Audio Task - Streaming + Dekodowanie
+- **Odpowiedzialność:** Dekodowanie I2S, streaming HTTP, parsowanie playlist, zarządzanie buforem
+- **Plik:** `src/main.cpp` (funkcja `AudioLoopTask()`)
+- **Priorytet:** 5 (wyższy niż główny wątek)
+- **Stack:** 40KB
+- **Watchdog:** Subskrybowany wewnątrz taska
+- **Inicjalizacja:** Opóźniona o 1s po starcie Core 1 dla stabilności
+
+### Komunikacja między rdzeniami
+1. **Kolejka FreeRTOS** (`audioQueue`, 8 slotów): `AudioCommand` z Core 1 → Core 0
+   - `AUDIO_CMD_CONNECT` - połącz do strumienia URL
+   - `AUDIO_CMD_STOP` - zatrzymaj odtwarzanie
+   - `AUDIO_CMD_VOLUME` - ustaw głośność (0-21)
+2. **Zmienne atomowe** (`std::atomic`): Core 0 → Core 1 (jednokierunkowo)
+   - `audioPlaying` - czy audio gra
+   - `audioBufferFilled` / `audioBufferFree` - stan bufora
+   - `audioBitrate` - aktualny bitrate
+3. **Zmienne volatile** (`isConnecting`): współdzielone, tylko do odczytu z Core 0
+
+## 📝 KONWENCJE KODOWANIA
+
+### Nazewnictwo
+- **Defines / stałe:** `SCREAMING_SNAKE_CASE` (np. `COL_BG`, `HEADER_H`)
+- **Zmienne i funkcje:** `snake_case` (np. `currentVolume`, `drawRadioUI`)
+- **Typy wyliczeniowe:** `PascalCase` (np. `AppMode`, `StreamQuality`, `AudioCmdType`)
+- **Callbacki:** brak stałej konwencji
+- **Stałe konfiguracyjne w config.h:** `SCREAMING_SNAKE_CASE`
+- **Globalne extern:** `snake_case`
+
+### Wzorce
+- **Nagłówki jako moduły funkcyjne** - brak osobnych .cpp dla logiki (wszystko inline w .h)
+- **Singleton wewnątrz funkcji** - `static` zmienne dla stanu lokalnego
+- **Dirty-check UI** - renderowanie tylko przy zmianie stanu lub heartbeat co 1000ms
+- **Non-blocking** - w main loop nigdy nie używaj `delay()` blokującego
+
+### Styl kodu
+- `inline` dla funkcji w nagłówkach (z wyjątkiem rzadkich przypadków)
+- `static` dla zmiennych lokalnych w funkcjach (persistent state)
+- `const` gdzie tylko możliwe
+- Serial.printf do debugowania (przez logger.h)
+- `esp_task_wdt_reset()` w strategicznych punktach przed blokującymi operacjami
+
+## 🔄 PRZEBIEG APLIKACJI
+
+### Sekwencja bootowania (setup)
+1. **Ustaw piny enkodera na HIGH** - zapobiega świeceniu diody RGB podczas bootu
+2. Diagnostyka pinów strapping ESP32-S3 (odczyt rejestru 0x60008038)
+3. Inicjalizacja PSRAM (fatalny halt jeśli brak)
+4. Watchdog init: 30s timeout
+5. Ekran (ILI9341), dotyk (XPT2046), enkoder (EC11 ISR)
+6. Load saved preferences (głośność z NVS)
+7. Inicjalizacja kolejki audio (8 slotów)
+8. Połączenie WiFi (blokujące, max 20s z WDT reset)
+9. Ekran logów startowych
+10. Pobranie pogody (jeśli WiFi OK)
+11. 1s opóźnienie dla stabilności rdzeni
+12. Start Audio Task na Core 0 (priorytet 5, stack 40KB)
+13. Wysłanie początkowej głośności do kolejki audio
+
+### Główna pętla (loop)
+1. WDT reset (zawsze na początku)
+2. `maintainConnectionState()` - timeout połączenia audio
+3. Obsługa dotyku (scroll, tap, double-tap, przytrzymanie)
+4. Zmiana głośności/jasności (przytrzymanie z repeat delay)
+5. Przełączanie trybów (MODE_WEATHER / MODE_RADIO)
+6. Dirty-check UI → renderowanie (tylko przy zmianie lub heartbeat 1000ms)
+7. `canvas->flush()` - wysłanie ramki do wyświetlacza
+8. Aktualizacja pogody co 60s (lub 2s przy pierwszym starcie)
+9. Obsługa enkodera EC11 (zmiana głośności, przycisk = zmiana trybu)
+10. `vTaskDelay(1)` - yield dla systemu
+
+### Audio Task (pętla na Core 0)
+1. Odbierz komendę z kolejki (non-blocking)
+2. Jeśli `AUDIO_CMD_CONNECT`: walidacja URL → ekstrakcja playlisty → `audio.connecttohost()`
+3. Jeśli `AUDIO_CMD_STOP`: `audio.stopSong()`
+4. Jeśli `AUDIO_CMD_VOLUME`: `audio.setVolume()`
+5. `audio.loop()` - dekodowanie i odtwarzanie (agresywnie, gdy gra)
+6. Aktualizacja stanów atomowych dla Core 1
+7. Health log co 1s (bufor, bitrate, czasy pętli)
+8. Przy bezczynności: `vTaskDelay(2)`, przy aktywności: `taskYIELD()`
+
+## 🎨 UI I WYŚWIETLANIE
+
+### Wyświetlacz
+- **Model:** ILI9341 (320x240), SPI
+- **Biblioteka:** GFX Library for Arduino @ 1.4.7 + Arduino_Canvas
+- **Canvas:** 320x240, pojedynczy `flush()` na klatkę (eliminacja migotania)
+- **Rotation:** 1 (landscape, zgodny z touch.setRotation(1))
+- **Inwersja kolorów:** Wyświetlacz ma fizycznie odwrócone kolory. Wszystkie wartości RGB565 w `config.h` są celowo odwrócone (bitwise NOT) dla kompensacji.
+
+### Paleta kolorów (config.h, wartości już zinwertowane)
+| Definicja | Kolor oryginalny | Kolor na wyświetlaczu | Zastosowanie |
+|-----------|-----------------|----------------------|--------------|
+| COL_BG | Biały (0xFFFF) | Czarny | Tło główne |
+| COL_TEXT | Czarny (0x0000) | Biały | Tekst podstawowy |
+| COL_GREEN | 0xF81F | Zielony | Status PLAY, pasek głośności |
+| COL_RED | 0x07FF | Czerwony | Status STOP |
+| COL_YELLOW | 0x001F | Żółty | Status CONNECTING |
+| COL_CYAN | 0xF800 | Cyjan | Krzywa temperatury |
+
+### Tryby
+- `MODE_WEATHER` - wykres temperatury z 72h, duża aktualna temp., sterowanie audio w tle
+- `MODE_RADIO` - lista stacji, header (play/pause, głośność, jasność, godzina), nawigacja
+- Przełączanie: przycisk enkodera lub dotyk dolnego paska nawigacji
+
+### Obsługa dotyku
+- **Scroll:** przytrzymanie > 200ms + przeciąganie na liście stacji
+- **Tap:** < 200ms, pojedyncze kliknięcie
+- **Double-tap:** dwa tapnięcia < 500ms, odległość < 60px → zatwierdzenie stacji
+- **Header:** przyciski głośności +/- (z repeat delay 200ms), ikony jasności (z repeat delay 100ms)
+- **Dolny pasek:** zmiana trybu (radio ↔ pogoda)
+- **Ikona play/pause:** toggle odtwarzania
+
+## 📻 LOGIKA RADIO
+
+### Stacje
+- Tablica `STATIONS[]` w `radio_logic.h` (8 stacji: RMF FM, Radio ZET, Radio 357, Złote Przeboje, Antyradio, TOK FM, Eska Rock, TOK FM 2)
+- Każda stacja ma 3 streamy (LQ, MQ, HQ) + flagę isTuba
+- Parsowanie playlist .pls i .m3u (przez extractStreamFromPlaylist)
+- Filtrowanie: showOnlyTuba, qualityFilter
+
+### Audio
+- **Biblioteka:** ESP32-audioI2S @ 3.0.12 (schreibfaul1/ESP32-audioI2S.git#3.0.12)
+- **Bufor PSRAM:** 1.5MB (1024*1024 + 256*256 bajtów)
+- **Timeout:** 5s, 2 retry
+- **Głośność:** 0-21 (zapisywana do NVS Preferences)
+- **Lazy init:** I2S inicjalizuje się dopiero przy pierwszym CONNECT
+- **Walidecja URL:** dwustopniowa (przed i po ekstrakcji playlisty) + hashowanie FNV1a
+
+## 🌤 LOGIKA POGODY
+
+- **API:** Open-Meteo (bez klucza API) - `http://api.open-meteo.com/v1/forecast?latitude=54.35&longitude=18.65&hourly=temperature_2m&past_days=3`
+- **Dane:** temperatura z ostatnich 72h
+- **Rendering:** wykres z osią Y (temperatura) i X (czas), siatka co 12h, krzywa Catmull-Rom spline z anty-aliasingiem
+- **Aktualizacja:** co 60s (lub 2s przy pierwszym pobraniu)
+- **Wykres:** 268x140px, z marginesami na osie
+
+## 🌐 LOGIKA WIFI
+
+- Połączenie blokujące w setup (max 20s timeout)
+- Auto-reconnect: brak automatycznego reconnectu w loop - wymagany restart
+- Sync czasu NTP po połączeniu: `configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org")`
+
+## ⏱ WATCHDOG (WDT)
+
+- **Timeout:** 30s (długi ze względu na SSL handshake)
+- **Panic:** true (reset przy timeout)
+- **Aktywny na obu rdzeniach**
+- Resetowany w: każdej iteracji loop, przed/po HTTP GET (pogoda/playlisty), przed audio.connecttohost(), przed vTaskDelay
+
+## 📊 LOGER (logger.h)
+
+- **Poziomy (funkcje):** `info()`, `error()`, `debugCore()`, `logAudioCmd()`, `logTouchEvent()`, `logStateChange()`
+- **Format:** `[timestamp][LEVEL][tag] message`
+- **Bufor cykliczny:** 20 linii × 80 znaków
+- **Telemetria:** `reportStatus()` co 10s (WiFi RSSI, stan audio, użycie bufora, RAM, PSRAM, CPU load, stack audio)
+- **CPU tracking:** `trackCPUStart()` / `trackCPUEnd()` dla obciążenia rdzenia 1
+- **Debug:** włączony przez `DEBUG_ENABLED=true`
+
+## 🔘 ENKODER EC11
+
+- **ISR:** `encoderISR()` w IRAM, bezpośredni odczyt z rejestrów GPIO (`GPIO_IN1_REG`)
+- **Algorytm:** 4-stanowy (00→01→11→10 i odwrotnie) - nigdy nie gubi kierunku
+- **Obrót:** zmiana głośności (1 detent = 4 jednostki enkodera)
+- **Przycisk:** przełączanie trybu (pogoda ↔ radio) z dźwiękiem potwierdzenia
+- **Mutex:** `portMUX_TYPE encoderMutex` dla atomowego odczytu pozycji
+
+## 💡 JASNOŚĆ EKRANU
+
+- **PWM:** LEDC kanał 0, 5kHz, 8-bit
+- **Zakres:** 1-255
+- **Zmiana:** logarytmiczna (×0.8 przy zmniejszaniu, ×1.2 przy zwiększaniu)
+- **Sterowanie:** ikony słońca w headerze (oba tryby)
+
+## 📚 BIBLIOTEKI (ZALEŻNOŚCI)
+
+| Biblioteka | Wersja | Źródło |
+|-----------|--------|--------|
+| XPT2046_Touchscreen | latest | github.com/PaulStoffregen/XPT2046_Touchscreen.git |
+| ArduinoJson | ^7.0.0 | bblanchon/ArduinoJson |
+| GFX Library for Arduino | 1.4.7 | moononournation/GFX Library for Arduino |
+| ESP32-audioI2S | 3.0.12 | github.com/schreibfaul1/ESP32-audioI2S.git#3.0.12 |
+
+## 🔧 NAJCZĘSTSZE PUNKTY ZMIAN (HOTSPOTY)
+
+1. **`src/main.cpp`** - główna pętla, enkoder, dotyk, tryby, cała orkiestracja
+2. **`include/radio_logic.h`** - lista stacji, UI radia, logika audio, ekstrakcja playlist
+3. **`include/weather_logic.h`** - pobieranie pogody, rysowanie wykresu
+4. **`include/config.h`** - piny, stałe, kolory, WiFi, API
+5. **`include/logger.h`** - system logowania (rzadko zmieniany)
+6. **`include/wifi_logic.h`** - logika WiFi (rzadko zmieniany)
+7. **`platformio.ini`** - zależności i flagi (rzadko zmieniany)
+
+## ⚠️ ZNANE PROBLEMY I LEKCJE
+
+| Problem | Rozwiązanie |
+|---------|-------------|
+| Migotanie ekranu | Canvas 320x240 z pojedynczym flush() |
+| Przeskakiwanie enkodera | Odczyt rejestru GPIO + algorytm 4-stanowy |
+| Reset podczas SSL Handshake | WDT 30s + reset przed connecttohost |
+| Underrun audio | Wyższy priorytet Core 0 + agresywny loop |
+| RGB LED świeci przy boot | Ustaw pinów enkodera na HIGH jako pierwsze |
+| Crash przy starcie | 1s delay przed startem drugiego rdzenia |
+| DynamicJsonDocument deprecated | Używać `JsonDocument` zamiast (ArduinoJson 7.x) |
+
+## ❌ CZEGO NIE ROBIĆ
+
+- **Nie używaj `delay()` w main loop** - blokuje watchdog i UI. Używaj `millis()` + zmiennych stanu.
+- **Nie modyfikuj listy stacji bez weryfikacji adresów URL** - adresy strumieni zmieniają się; sprawdzaj na http://nossl.fmstream.org/
+- **Nie używaj adresów HTTPS dla strumieni audio** - wymagają certyfikatów i obciążają CPU; preferuj HTTP
+- **Nie dodawaj blokujących operacji do Audio Task** - spowoduje underrun audio
+- **Nie pomijaj walidacji URL** - każdy URL musi przejść przez `validateAudioUrl()` przed i po ekstrakcji
+- **Nie używaj `Serial.println()` bezpośrednio w nowym kodzie** - używaj funkcji z logger.h
+- **Nie modyfikuj pinów strappingu (GPIO 0, 3, 45, 46) bez uzgodnienia** - mogą zablokować boot
+
+## ✅ DOBRE PRAKTYKI
+
+- **Watchdog reset** przed każdą potencjalnie blokującą operacją (HTTP, SSL, connecttohost)
+- **Sprawdzaj `isConnected()`** przed operacjami sieciowymi
+- **Używaj `std::atomic`** dla zmiennych współdzielonych między rdzeniami
+- **Używaj `xQueueSend` (non-blocking)** dla komend audio z Core 1
+- **Implementuj dirty-check** dla UI - renderuj tylko gdy stan się zmienił
+- **Sprawdzaj dostępność PSRAM** (`psramInit()`) - bez niej aplikacja nie działa
+- **Używaj `Preferences`** do zapisu/odczytu ustawień (głośność) z NVS
+- **Każda nowa funkcjonalność wymaga sprawdzenia** czy nie blokuje main loop > 30s (WDT timeout)
+- **Testuj na fizycznym sprzęcie** - symulator nie odda rzeczywistego zachowania I2S/dotyku

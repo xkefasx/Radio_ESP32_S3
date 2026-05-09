@@ -1,0 +1,107 @@
+# ==============================================================
+#  PINOUT SCHEMAT PŁYTKI ESP32-S3 N16R8 | PROJEKT RADIO
+# ==============================================================
+#
+#                             ┌─────────────────────┐
+#                             │    S3-N16R8         │
+#                             │  WiFi + Bluetooth   │
+#                             └─────────────────────┘
+#
+#  LEWA STRONA (PINY)             PRAWA STRONA (PINY)
+# ┌───────────────┐               ┌───────────────┐
+# │ 3V3     ●  o  │ GND           │ GND     o  ●  │ GND
+# │ 3V3     ●  o  │ TX            │ TX      o  ●  │ UART TX
+# │ RST     o  o  │ RX            │ RX      o  o  │ UART RX
+# │ 4       ◼  o  │ 1             │ 1       o  o  │
+# │ 5       ◼  o  │ 2             │ 2       o  o  │
+# │ 6       ◼  o  │ 42            │ 42      ◼  o  │ ENC1_KEY
+# │ 7       o  o  │ 41            │ 41      ◼  o  │ ENC1_S2
+# │ 15      ◼  o  │ 40            │ 40      ◼  o  │ ENC1_S1
+# │ 16      ◼  o  │ 39            │ 39      ◼  o  │ ENC2_S2
+# │ 17      ◼  o  │ 38            │ 38      ◼  o  │ ENC2_S1
+# │ 18      o  o  │ 37            │ 37      o  o  │
+# │ 8       o  o  │ 36            │ 36      o  o  │
+# │ 3       o  o  │ 35            │ 35      o  o  │ (PSRAM - nie używać!)
+# │ 3       o  o  │ 8             │ 8       o  o  │
+# │ 46      o  o  │ 0             │ 0       o  o  │ BOOT
+# │ 9       ◼  o  │ 45            │ 45      o  o  │
+# │ 10      ◼  o  │ 48            │ 48      ◼  o  │ ENC2_KEY
+# │ 11      ◼  o  │ 47            │ 47      o  o  │
+# │ 12      ◼  o  │ 21            │ 21      o  o  │
+# │ 13      ◼  o  │ 20            │ 20      o  o  │
+# │ 14      ◼  o  │ 19            │ 19      o  o  │
+# │ 5VIN    ●  o  │ GND           │ GND     o  ●  │ GND
+# │ GND     ●  o  │ GND           │ GND     o  ●  │ GND
+# └───────────────┘               └───────────────┘
+#
+#  LEGENDA:
+#  ●  - PIN ZASILANIA / MASY
+#  ◼  - PIN WYKORZYSTANY W PROJEKCIE
+#  o  - PIN WOLNY / NIEOBECNIE UŻYWANY
+#
+# ==============================================================
+#  SZCZEGÓŁOWY OPIS WYKORZYSTANYCH PINÓW
+# ==============================================================
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │  ✅ EKRAN TFT ILI9341                                      │
+# ├─────────────────────────────────────────────────────────────┤
+# │  PIN 4   │ TFT_BL   │ Podświetlenie ekranu                 │
+# │  PIN 9   │ TFT_RST  │ Reset ekranu                         │
+# │  PIN 10  │ TFT_CS   │ Chip Select SPI ekranu               │
+# │  PIN 11  │ TFT_MOSI │ SPI MOSI dane do ekranu              │
+# │  PIN 12  │ TFT_SCK  │ SPI Zegar                            │
+# │  PIN 13  │ TFT_MISO │ SPI MISO dane z ekranu               │
+# │  PIN 14  │ TFT_DC   │ Data / Command                       │
+# └─────────────────────────────────────────────────────────────┘
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │  ✅ DOTYK XPT2046                                          │
+# ├─────────────────────────────────────────────────────────────┤
+# │  PIN 5   │ TOUCH_CS  │ Chip Select kontrolera dotyku       │
+# │  PIN 6   │ TOUCH_IRQ │ Przerwanie dotyku                   │
+# └─────────────────────────────────────────────────────────────┘
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │  ✅ AUDIO I2S MAX98357A                                    │
+# ├─────────────────────────────────────────────────────────────┤
+# │  PIN 15  │ I2S_LRC   │ Word Select / L/R Clock             │
+# │  PIN 16  │ I2S_BCLK  │ Bit Clock                           │
+# │  PIN 17  │ I2S_DOUT  │ Wyjście danych audio                │
+# └─────────────────────────────────────────────────────────────┘
+#
+# ┌─────────────────────────────────────────────────────────────┐
+# │  ✅ ENKODER OBROTOWY EC11 #1 (GÓRNY)                       │
+# ├─────────────────────────────────────────────────────────────┤
+# │  PIN 40  │ ENC1_PIN_S1 │ Kanał A enkodera 1                │
+# │  PIN 41  │ ENC1_PIN_S2 │ Kanał B enkodera 1 (po kolei: 40,41,42) │
+# │  PIN 42  │ ENC1_PIN_KEY│ Przycisk enkodera 1               │
+# └─────────────────────────────────────────────────────────────┘
+
+# ┌─────────────────────────────────────────────────────────────┐
+# │  ✅ ENKODER OBROTOWY EC11 #2 (DOLNY)                       │
+# ├─────────────────────────────────────────────────────────────┤
+# │  PIN 38  │ ENC2_PIN_S1 │ Kanał A enkodera 2                │
+# │  PIN 39  │ ENC2_PIN_S2 │ Kanał B enkodera 2 (all on same side) │
+# │  PIN 48  │ ENC2_PIN_KEY│ Przycisk enkodera 2               │
+# └─────────────────────────────────────────────────────────────┘
+#
+# ==============================================================
+#  PODSUMOWANIE
+# ==============================================================
+#  Całkowita liczba pinów GPIO: 45
+#  Wykorzystane w projekcie:   15 pinów
+#  Dostępne wolne:             30 pinów
+#
+#  Wbudowane na płytce:
+#  ✅ Dioda RGB (GPIO48) - NIEUŻYWANA (pin zajęty przez ENC2_KEY)
+#  ✅ Przycisk BOOT (GPIO0)
+#  ✅ Przycisk RST
+#  ✅ Konwerter USB-UART FT232
+#
+# ==============================================================
+#  UWAGI:
+#  - Piny GPIO 34, 35, 36, 37, 38, 39 są TYLKO WEJŚCIOWE
+#  - Nie używaj pinów GPIO 0, 3, 45, 46 przy starcie
+#  - Piny 1, 2, 19, 20 są podłączone do flasha - NIE UŻYWAĆ
+# ==============================================================
