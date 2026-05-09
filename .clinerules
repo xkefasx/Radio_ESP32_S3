@@ -19,12 +19,14 @@ Radio_ESP32_S3/
 │   ├── wifi_logic.h  # Zarządzanie WiFi (connect/reconnect)
 │   ├── radio_logic.h # Audio I2S, playlisty, UI radia, enkoder jasności
 │   ├── weather_logic.h # Pobieranie/wyświetlanie pogody (Open-Meteo)
-│   └── logger.h      # System logowania, telemetria, ekran logów
+│   ├── logger.h      # System logowania, telemetria, ekran logów
+│   └── config_manager.h # Konfiguracja (NVS: WiFi, stacje, głośność)
 ├── src/
 │   └── main.cpp      # Setup, loop, enkoder, dotyk, renderowanie UI
 ├── lib/              # Biblioteki zewnętrzne (rzadko modyfikowane)
 ├── test/             # Testy (obecnie puste)
 ├── platformio.ini    # Konfiguracja build + biblioteki
+├── partitions_16MB_littlefs.csv # Tablica partycji 16MB z LittleFS
 ├── DEVELOPER_MEMORY.md  # Dokumentacja techniczna projektu
 ├── PINOUT_ESP32_S3.txt  # Schemat pinów
 ├── STREAMS_GUIDE.md     # Jak pozyskiwać adresy strumieni
@@ -101,8 +103,27 @@ Dla **WROOM-1 N16R8** (8MB Octal SPI PSRAM), piny **GPIO35, GPIO36, GPIO37** są
 
 ### Pamięć
 - **PSRAM:** 8MB OPI, wymagany do bufora audio (1.5MB alokowane)
-- **Flash:** 16MB QIO, partycje default_16MB.csv
+- **Flash:** 16MB QIO, partycje `partitions_16MB_littlefs.csv`
 - **Stack Audio Task:** 40KB na rdzeniu 0
+
+### Tablica partycji (`partitions_16MB_littlefs.csv`)
+```
+# Name,   Type, SubType, Offset,  Size,       Flags
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+app0,     app,  factory, 0x10000, 0x380000,
+app1,     app,  ota_0,   0x390000,0x380000,
+eeprom,   data, 0x99,    0x710000,0x1000,
+littlefs, data, spiffs,  0x711000,0x8EF000,
+```
+**Kluczowe zasady:**
+- **app0 NIE może mieć offsetu 0x20000** - bootloader oczekuje 0x10000
+- **Musi być partycja `eeprom`** (typ 0x99) - framework Arduino oczekuje jej
+- **nvs musi mieć 0x5000** (20KB) z offsetem 0x9000 - inaczej overlap z otadata
+- **otadata na 0xe000** (8KB) - zaraz po nvs
+- **LittleFS na końcu** (podtyp `spiffs`) - po wszystkich innych partycjach
+- **Po zmianie tablicy partycji** wymagany `pio run --target erase` przed uploadem!
+- Suma: 0x711000 + 0x8EF000 = **0x1000000 (16MB)** - wypełnienie całego flasha
 
 ## 🏗 ARCHITEKTURA APLIKACJI (Dual-Core)
 
