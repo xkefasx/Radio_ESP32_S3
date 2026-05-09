@@ -6,9 +6,9 @@
 #include <freertos/semphr.h>
 #include <atomic>
 
-// ===== WiFi (loaded from variables.txt) =====
-extern char wifi_ssid[64];
-extern char wifi_pass[64];
+// ===== WiFi =====
+const char* WIFI_SSID = "PLAY_Swiatlowod_36EE";
+const char* WIFI_PASS = "XT7SUqGt";
 
 // ===== Ekran ILI9341 (kolejność wg złącza z ekran.md) =====
 //  6) miso       → TFT_MISO  (SPI MISO - wspólne z dotykiem T_do)

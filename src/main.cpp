@@ -9,11 +9,11 @@
 #include <freertos/semphr.h>
 #include <esp_task_wdt.h>
 #include "config.h"
-#include "logger.h"
-#include "variables.h"  // Includes radio_logic.h, defines wifi_ssid, wifi_pass, stations, volume
 #include "wifi_logic.h"
 #include "weather_logic.h"
+#include "radio_logic.h"
 #include "clock_screen.h"
+#include "logger.h"
 
 // Forward declaration (setupAudio defined in radio_logic.h)
 void setupAudio();
@@ -34,6 +34,7 @@ TaskHandle_t AudioTask;
 QueueHandle_t audioQueue;
 bool weatherLoaded = false;
 unsigned long lastTouchAction = 0; // Globalna zmienna dla radio_logic.h
+Preferences preferences;
 
 // Statystyki i stan audio dla Rdzenia 1 (Atomic)
 std::atomic<bool> audioPlaying{false};
@@ -486,9 +487,13 @@ void setup() {
     touch.begin();
     touch.setRotation(1);
 
-    // Load variables from LittleFS (WiFi, stations, volume)
-    initVariables();
-    currentVolume = volume;
+    // Load saved volume from Preferences
+    preferences.begin("radio", false);
+    int savedVolume = preferences.getInt("volume", 6);
+    if (savedVolume >= 0 && savedVolume <= 21) {
+        currentVolume = savedVolume;
+    }
+    preferences.end();
 
     // 4. Inicjalizacja kolejki audio
     audioQueue = xQueueCreate(8, sizeof(AudioCommand));
@@ -698,9 +703,9 @@ void loop() {
                     int sIdx = getBestStreamForStation(activeIdx);
                     AudioCommand cmd;
                     cmd.type = AUDIO_CMD_CONNECT;
-                    strncpy(cmd.data.url, stations[activeIdx].streams[sIdx].url, 255);
+                    strncpy(cmd.data.url, STATIONS[activeIdx].streams[sIdx].url, 255);
                     cmd.data.url[255] = '\0';
-                    logAudioCmd("SENDING", "CONNECT (header tap): " + String(stations[activeIdx].name));
+                    logAudioCmd("SENDING", "CONNECT (header tap): " + String(STATIONS[activeIdx].name));
                     xQueueSend(audioQueue, &cmd, 0);
                 }
                 lastTouchAction = now;
@@ -729,8 +734,10 @@ void loop() {
                     cmd.type = AUDIO_CMD_VOLUME;
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
-                    volume = currentVolume;
-                    saveVariables();
+                    // Save volume to Preferences
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
                 logTouchEvent("VOL_MINUS", tx, ty, touchDuration);
                 lastTouchAction = now;
@@ -745,8 +752,10 @@ void loop() {
                     cmd.type = AUDIO_CMD_VOLUME;
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
-                    volume = currentVolume;
-                    saveVariables();
+                    // Save volume to Preferences
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
                 logTouchEvent("VOL_PLUS", tx, ty, touchDuration);
                 lastTouchAction = now;
@@ -761,8 +770,10 @@ void loop() {
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
                     lastVolChange = now;
-                    volume = currentVolume;
-                    saveVariables();
+                    // Save volume to Preferences
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 } else if (volPlusPressed && currentVolume < 21) {
                     currentVolume++;
                     AudioCommand cmd;
@@ -770,8 +781,10 @@ void loop() {
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
                     lastVolChange = now;
-                    volume = currentVolume;
-                    saveVariables();
+                    // Save volume to Preferences
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
             }
 
@@ -839,8 +852,9 @@ void loop() {
                     cmd.type = AUDIO_CMD_VOLUME;
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
-                    volume = currentVolume;
-                    saveVariables();
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
                 lastTouchAction = now;
             } else if (touchingPlus && !volPlusPressed) {
@@ -853,8 +867,9 @@ void loop() {
                     cmd.type = AUDIO_CMD_VOLUME;
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
-                    volume = currentVolume;
-                    saveVariables();
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
                 lastTouchAction = now;
             }
@@ -867,8 +882,9 @@ void loop() {
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
                     lastVolChange = now;
-                    volume = currentVolume;
-                    saveVariables();
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 } else if (volPlusPressed && currentVolume < 21) {
                     currentVolume++;
                     AudioCommand cmd;
@@ -876,8 +892,9 @@ void loop() {
                     cmd.data.volume = currentVolume;
                     xQueueSend(audioQueue, &cmd, 0);
                     lastVolChange = now;
-                    volume = currentVolume;
-                    saveVariables();
+                    preferences.begin("radio", false);
+                    preferences.putInt("volume", currentVolume);
+                    preferences.end();
                 }
             }
 
@@ -1011,8 +1028,9 @@ void loop() {
             cmd.type = AUDIO_CMD_VOLUME;
             cmd.data.volume = currentVolume;
             xQueueSend(audioQueue, &cmd, 0);
-            volume = currentVolume;
-            saveVariables();
+            preferences.begin("radio", false);
+            preferences.putInt("volume", currentVolume);
+            preferences.end();
             uiDirty = true;
             lastTouchAction = now;
         }
@@ -1027,8 +1045,9 @@ void loop() {
             cmd.type = AUDIO_CMD_VOLUME;
             cmd.data.volume = currentVolume;
             xQueueSend(audioQueue, &cmd, 0);
-            volume = currentVolume;
-            saveVariables();
+            preferences.begin("radio", false);
+            preferences.putInt("volume", currentVolume);
+            preferences.end();
             uiDirty = true;
             lastTouchAction = now;
         }
@@ -1052,7 +1071,7 @@ void loop() {
             while (steps > 0) {
                 if (currentMode == MODE_RADIO) {
                     int newIdx = activeIdx + 1;
-                    if (newIdx >= total_stations) newIdx = 0;
+                    if (newIdx >= TOTAL_STATIONS) newIdx = 0;
                     activeIdx = newIdx;
                     ensureActiveStationVisible();
                 } else if (currentMode == MODE_WEATHER || currentMode == MODE_CLOCK) {
@@ -1074,7 +1093,7 @@ void loop() {
             while (steps > 0) {
                 if (currentMode == MODE_RADIO) {
                     int newIdx = activeIdx - 1;
-                    if (newIdx < 0) newIdx = total_stations - 1;
+                    if (newIdx < 0) newIdx = TOTAL_STATIONS - 1;
                     activeIdx = newIdx;
                     ensureActiveStationVisible();
                 } else if (currentMode == MODE_WEATHER || currentMode == MODE_CLOCK) {
@@ -1154,5 +1173,5 @@ void loop() {
     vTaskDelay(1);  // 1 tick = ~10-15ms, daje czas innym zadaniom
 }
 
-void audio_info(const char *info_msg) { /* silenced - too noisy */ }
+void audio_info(const char *msg) { /* silenced - too noisy */ }
 void audio_bitrate(const char *br) { /* silenced - too noisy */ }

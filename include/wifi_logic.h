@@ -27,8 +27,8 @@ void setupWiFi() {
     WiFi.mode(WIFI_STA);
 
     // Próba 1: standardowe połączenie
-    info("WIFI", "Laczenie z: " + String(wifi_ssid));
-    WiFi.begin(wifi_ssid, wifi_pass);
+    info("WIFI", "Laczenie z: " + String(WIFI_SSID));
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -47,7 +47,7 @@ void setupWiFi() {
         esp_task_wdt_reset();
         WiFi.mode(WIFI_STA);
         delay(100);
-        WiFi.begin(wifi_ssid, wifi_pass);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
         
         attempts = 0;
         while (WiFi.status() != WL_CONNECTED && attempts < 20) {

@@ -49,7 +49,7 @@ void drawClockUI(Arduino_Canvas *canvas, int br, int vol, bool isPlaying, bool i
         canvas->print("> ");
         extern int activeIdx;
         if (activeIdx >= 0) {
-            canvas->print(stations[activeIdx].name);
+            canvas->print(STATIONS[activeIdx].name);
         } else {
             canvas->print("Radio");
         }
