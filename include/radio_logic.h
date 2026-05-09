@@ -19,13 +19,13 @@ extern QueueHandle_t audioQueue;
 enum StreamQuality { Q_LQ, Q_MQ, Q_HQ, Q_SSL };
 
 struct RadioStream {
-    const char* url;
+    char url[256];
     StreamQuality quality;
-    const char* label;
+    char label[32];
 };
 
 struct RadioStation {
-    const char* name;
+    char name[64];
     RadioStream streams[3]; 
     int streamCount;
     bool isTuba;           

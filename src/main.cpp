@@ -10,10 +10,11 @@
 #include <esp_task_wdt.h>
 #include "config.h"
 #include "wifi_logic.h"
-#include "weather_logic.h"
 #include "radio_logic.h"
+#include "weather_logic.h"
 #include "clock_screen.h"
 #include "logger.h"
+#include "config_manager.h"
 
 // Forward declaration (setupAudio defined in radio_logic.h)
 void setupAudio();
@@ -487,13 +488,10 @@ void setup() {
     touch.begin();
     touch.setRotation(1);
 
-    // Load saved volume from Preferences
-    preferences.begin("radio", false);
-    int savedVolume = preferences.getInt("volume", 6);
-    if (savedVolume >= 0 && savedVolume <= 21) {
-        currentVolume = savedVolume;
-    }
-    preferences.end();
+    // Load config from NVS (WiFi, stations, volume)
+    loadConfig();
+    currentVolume = cfg_volume;
+    info("CFG", "Config loaded: vol=" + String(currentVolume) + ", stations=" + String(cfg_station_count));
 
     // 4. Inicjalizacja kolejki audio
     audioQueue = xQueueCreate(8, sizeof(AudioCommand));
