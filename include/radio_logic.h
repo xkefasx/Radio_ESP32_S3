@@ -31,18 +31,10 @@ struct RadioStation {
     bool isTuba;           
 };
 
-const RadioStation STATIONS[] = {
-    {"RMF FM",      {{"http://stream11.radiostream.pl/tuba1-1.mp3",    Q_HQ, "192 MP3"}}, 1, true},
-    {"Radio ZET",   {{"http://stream11.radiostream.pl/tuba2-1.mp3",    Q_HQ, "224 MP3"}}, 1, true},
-    {"Radio 357",   {{"http://stream.radio357.pl/m3u8",   Q_HQ, "224 AAC"}}, 1, true},
-    {"Złote Przeboje", {{"http://stream11.radiostream.pl/tuba3-1.mp3", Q_HQ, "192 MP3"}}, 1, true},
-    {"Antyradio",   {{"http://an01.cdn.eurozet.pl/ant-waw.mp3",    Q_HQ, "128 MP3"}}, 1, true},
-    {"TOK FM",      {{"http://stream30.radiostream.pl/tuba10-1.mp3",   Q_MQ, "128 MP3"}}, 1, true},
-    {"Eska Rock",   {{"http://stream11.radiostream.pl/tuba8-1.mp3",    Q_HQ, "192 MP3"}}, 1, true},
-    {"TOK FM 2",      {{"https://stream30.radiostream.pl/tuba10-1.mp3",   Q_MQ, "128 MP3"}}, 1, true},
-};
+// Stacje radiowe - wczytywane z NVS przez config_manager.h (fallback do domyślnych)
+extern RadioStation cfg_stations[];
+extern int cfg_station_count;
 
-const int TOTAL_STATIONS = sizeof(STATIONS) / sizeof(STATIONS[0]);
 extern Audio audio;
 
 static int scrollY = 0;
@@ -195,7 +187,7 @@ inline void startStationConnection(int stationIdx) {
         return;
     }
 
-    logRadioConnect("Starting connection for station %d (%s)", stationIdx, STATIONS[stationIdx].name);
+    logRadioConnect("Starting connection for station %d (%s)", stationIdx, cfg_stations[stationIdx].name);
     
     int sIdx = getBestStreamForStation(stationIdx);
     logRadioConnect("Selected stream index %d", sIdx);
@@ -203,7 +195,7 @@ inline void startStationConnection(int stationIdx) {
     isConnecting = true;
     lastConnectionAttempt = millis();
     
-    const char* playlistUrl = STATIONS[stationIdx].streams[sIdx].url;
+    const char* playlistUrl = cfg_stations[stationIdx].streams[sIdx].url;
     logRadioConnect("Original URL: %s", playlistUrl);
 
     // NOTE: Playlist parsing moved to Core 0 (Audio task) to keep UI fully responsive.
@@ -245,8 +237,8 @@ void setupAudio() {
 }
 
 int getBestStreamForStation(int stationIdx) {
-    for(int i = 0; i < STATIONS[stationIdx].streamCount; i++) {
-        if(STATIONS[stationIdx].streams[i].quality == qualityFilter) return i;
+    for(int i = 0; i < cfg_stations[stationIdx].streamCount; i++) {
+        if(cfg_stations[stationIdx].streams[i].quality == qualityFilter) return i;
     }
     return 0;
 }
@@ -257,7 +249,7 @@ void handleRadioScroll(int ty, bool isTouched) {
         int delta = ty - lastTouchY;
         scrollY += delta;
         int visibleCount = 0;
-        for(int i = 0; i < TOTAL_STATIONS; i++) if(!showOnlyTuba || STATIONS[i].isTuba) visibleCount++;
+        for(int i = 0; i < cfg_station_count; i++) if(!showOnlyTuba || cfg_stations[i].isTuba) visibleCount++;
         int minScroll = -(visibleCount * itemH - 160 - 50); // Add buffer to ensure at least 3 stations visible
         // Zablokuj przewijanie w górę powyżej Y=40 (górny pasek)
         // scrollY = 0 oznacza początek listy na Y=40
@@ -360,7 +352,7 @@ void drawRadioUI(Arduino_Canvas *canvas, int vol, int br, bool isPlaying, bool i
     if (activeIdx >= 0) {
         canvas->setTextColor(isPlaying ? COL_GREEN : COL_TEXT_SEC);
         canvas->setCursor(STATION_NAME_X, STATION_NAME_Y);
-        canvas->print(STATIONS[activeIdx].name);
+        canvas->print(cfg_stations[activeIdx].name);
     }
 
     // Pasek głośności
@@ -436,8 +428,8 @@ void drawRadioUI(Arduino_Canvas *canvas, int vol, int br, bool isPlaying, bool i
     // ===== LISTA STACJI =====
     int currentY = (HEADER_H + 5) + scrollY;
     int visibleCount = 0;
-    for (int i = 0; i < TOTAL_STATIONS; i++) {
-        if (showOnlyTuba && !STATIONS[i].isTuba) continue;
+    for (int i = 0; i < cfg_station_count; i++) {
+        if (showOnlyTuba && !cfg_stations[i].isTuba) continue;
         // Tylko rysuj elementy które są w obszarze Y=40-210 (między headerem a nawigacją)
         if (currentY >= 40 && currentY < 210) {
             uint16_t bgColor, txtColor;
@@ -462,14 +454,14 @@ void drawRadioUI(Arduino_Canvas *canvas, int vol, int br, bool isPlaying, bool i
             canvas->setTextColor(txtColor);
             canvas->setTextSize(2);
             canvas->setCursor(15, currentY + 10);
-            canvas->print(STATIONS[i].name);
+            canvas->print(cfg_stations[i].name);
 
             // Jakość streamu (mały tekst po prawej)
             canvas->setTextSize(1);
             canvas->setTextColor(COL_TEXT_DIM);
             int sIdx = getBestStreamForStation(i);
             canvas->setCursor(260, currentY + 14);
-            canvas->print(STATIONS[i].streams[sIdx].label);
+            canvas->print(cfg_stations[i].streams[sIdx].label);
 
         }
         currentY += 45;
@@ -526,13 +518,13 @@ void handleRadioActions(int tx, int ty) {
     int currentY = 40 + scrollY;  // ZGODNE z drawRadioUI
     const int touchPadding = 8;  // Dodatkowe 8px tolerancji powyżej/poniżej elementu
     const int displayItemH = 45;  // ZGODNE z drawRadioUI (używa 45 zamiast itemH=50)
-    for (int i = 0; i < TOTAL_STATIONS; i++) {
-        if (showOnlyTuba && !STATIONS[i].isTuba) {
+    for (int i = 0; i < cfg_station_count; i++) {
+        if (showOnlyTuba && !cfg_stations[i].isTuba) {
             continue;  // Pomiń niewidoczne stacje - NIE inkrementuj currentY (jak w drawRadioUI)
         }
         // Zwiększony obszar dotyku dla łatwiejszego zaznaczania
         if (ty > currentY - touchPadding && ty < currentY + displayItemH + touchPadding) {
-            logRadioAction("Selected station idx=%d, name=%s, currentY=%d", i, STATIONS[i].name, currentY);
+            logRadioAction("Selected station idx=%d, name=%s, currentY=%d", i, cfg_stations[i].name, currentY);
             activeIdx = i;
             if (!canAttemptConnection()) {
                 info("AUDIO", "Connection in progress or cooldown active");
@@ -548,12 +540,12 @@ void handleRadioActions(int tx, int ty) {
 
 // Funkcja zapewniająca że aktywna stacja jest zawsze widoczna w viewport
 void ensureActiveStationVisible() {
-    if (activeIdx < 0 || activeIdx >= TOTAL_STATIONS) return;
+    if (activeIdx < 0 || activeIdx >= cfg_station_count) return;
 
     // Policz pozycję Y aktywnej stacji (bez scrollY)
     int stationY = (HEADER_H + 5);
     for (int i = 0; i < activeIdx; i++) {
-        if (showOnlyTuba && !STATIONS[i].isTuba) continue;
+        if (showOnlyTuba && !cfg_stations[i].isTuba) continue;
         stationY += 45;
     }
 

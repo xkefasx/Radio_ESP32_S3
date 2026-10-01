@@ -16,8 +16,8 @@ void drawClockUI(Arduino_Canvas *canvas, int br, int vol, bool isPlaying, bool i
         char timeStr[9];
         strftime(timeStr, 9, "%H:%M", &ti);
         canvas->setTextColor(COL_TEXT);
-        canvas->setTextSize(6);
-        int textW = strlen(timeStr) * 36; // ~36px per char w size 6
+        canvas->setTextSize(7);
+        int textW = strlen(timeStr) * 42; // ~42px per char w size 7
         canvas->setCursor((320 - textW) / 2, 70);
         canvas->print(timeStr);
     }
@@ -49,7 +49,7 @@ void drawClockUI(Arduino_Canvas *canvas, int br, int vol, bool isPlaying, bool i
         canvas->print("> ");
         extern int activeIdx;
         if (activeIdx >= 0) {
-            canvas->print(STATIONS[activeIdx].name);
+            canvas->print(cfg_stations[activeIdx].name);
         } else {
             canvas->print("Radio");
         }

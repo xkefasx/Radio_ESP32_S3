@@ -13,9 +13,10 @@
 #include "radio_logic.h"
 #include "weather_logic.h"
 #include "clock_screen.h"
+#include "timer_logic.h"
 #include "logger.h"
 #include "config_manager.h"
-
+#include "ap.h"
 // Forward declaration (setupAudio defined in radio_logic.h)
 void setupAudio();
 
@@ -43,6 +44,14 @@ std::atomic<uint32_t> audioBufferFilled{0};
 std::atomic<uint32_t> audioBufferFree{0};
 std::atomic<uint32_t> audioBitrate{0};
 volatile bool audioInitialized = false;
+
+// ===== Sleep Timer =====
+std::atomic<bool> timerActive{false};
+std::atomic<int> timerRemainingSeconds{0};
+TimerMode currentTimerMode = TIMER_MODE_SLEEP;
+int timerMinutes = 30;  // Domyślnie 30 minut
+int alarmHour = 7;      // Domyślnie 7:00
+int alarmMinute = 0;
 
 // Akcesory dla loggera (Rdzeń 1)
 bool getAudioPlaying() { return audioPlaying.load(); }
@@ -328,7 +337,7 @@ void IRAM_ATTR encoderISR() {
     // Wykrywanie pełnego detentu (powrót do stanu 00)
     if (newState == 0 && state != 0) {
         unsigned long now = millis();
-        if (now - last_time > 5) {  // 5ms debounce
+        if (now - last_time > 15) {  // 15ms debounce
             portENTER_CRITICAL_ISR(&encoderMutex);
             // Kierunek na podstawie poprzedniego stanu
             if (state == 1) encoderPosition++;      // CW: 00→01→11→10→00
@@ -357,7 +366,7 @@ void IRAM_ATTR navEncoderISR() {
     // Wykrywanie pełnego detentu (powrót do stanu 00)
     if (newState == 0 && state != 0) {
         unsigned long now = millis();
-        if (now - last_time > 5) {  // 5ms debounce
+        if (now - last_time > 15) {  // 15ms debounce
             portENTER_CRITICAL_ISR(&navEncoderMutex);
             // Kierunek na podstawie poprzedniego stanu
             if (state == 1) navEncoderPosition++;      // CW: 00→01→11→10→00
@@ -488,8 +497,12 @@ void setup() {
     touch.begin();
     touch.setRotation(1);
 
-    // Load config from NVS (WiFi, stations, volume)
-    loadConfig();
+    // Load volume from NVS, stations+WiFi from LittleFS file (fallback to defaults)
+    loadConfig();                      // volume only from NVS
+    if (!loadConfigFromFile()) {       // stations+WiFi from LittleFS file (if exists)
+        applyDefaultStations();        // fallback to hardcoded defaults
+        info("CFG", "Using default stations (" + String(cfg_station_count) + ")");
+    }
     currentVolume = cfg_volume;
     info("CFG", "Config loaded: vol=" + String(currentVolume) + ", stations=" + String(cfg_station_count));
 
@@ -701,9 +714,9 @@ void loop() {
                     int sIdx = getBestStreamForStation(activeIdx);
                     AudioCommand cmd;
                     cmd.type = AUDIO_CMD_CONNECT;
-                    strncpy(cmd.data.url, STATIONS[activeIdx].streams[sIdx].url, 255);
+                    strncpy(cmd.data.url, cfg_stations[activeIdx].streams[sIdx].url, 255);
                     cmd.data.url[255] = '\0';
-                    logAudioCmd("SENDING", "CONNECT (header tap): " + String(STATIONS[activeIdx].name));
+                    logAudioCmd("SENDING", "CONNECT (header tap): " + String(cfg_stations[activeIdx].name));
                     xQueueSend(audioQueue, &cmd, 0);
                 }
                 lastTouchAction = now;
@@ -825,9 +838,15 @@ void loop() {
                         lastTapY = ty;
                     }
                     lastTouchAction = now;
-                }
             }
-
+        }
+    } 
+        else if (currentMode == MODE_TIMER) {
+            // Obsługa dotyku na ekranie timera
+            if (touchDuration > 25 && (now - lastTouchAction) > TOUCH_DEBOUNCE_MS) {
+                handleTimerTouch(tx, ty, now);
+                uiDirty = true;
+            }
         }
         else if (currentMode == MODE_WEATHER && ty < HEADER_H) {
             // ✅ Obsługa przycisków głośności tak samo jak w radiu
@@ -943,6 +962,10 @@ void loop() {
             }
         } else if (currentMode == MODE_CLOCK) {
             drawClockUI(canvas, brightness, currentVolume, currAudioPlaying, currConnecting);
+        } else if (currentMode == MODE_TIMER) {
+            drawTimerUI(canvas, brightness, currentVolume, currAudioPlaying, currConnecting);
+        } else if (currentMode == MODE_AP) {
+            drawAPScreen(canvas);
         } else {
             drawRadioUI(canvas, currentVolume, brightness, currAudioPlaying, currConnecting);
         }
@@ -953,6 +976,45 @@ void loop() {
 
         // ZAWSZE yield po renderze - audio ma 1MB bufor, przetrwa przerwę
         delay(1);  // 1ms yield dla Rdzenia 0
+    }
+
+    // ===== Sleep Timer - odliczanie co sekundę =====
+    static unsigned long lastTimerTick = 0;
+    if (timerActive.load() && (now - lastTimerTick >= 1000)) {
+        int remaining = timerRemainingSeconds.load();
+        if (remaining > 0) {
+            timerRemainingSeconds = remaining - 1;
+            // Aktualizuj UI co sekundę gdy timer aktywny
+            if (currentMode == MODE_TIMER) {
+                uiDirty = true;
+            }
+        } else {
+            // Timer się skończył
+            timerActive = false;
+            
+            if (currentTimerMode == TIMER_MODE_SLEEP) {
+                // SLEEP: STOP audio i przełącz na zegar
+                AudioCommand cmd;
+                cmd.type = AUDIO_CMD_STOP;
+                xQueueSend(audioQueue, &cmd, 0);
+                currentMode = MODE_CLOCK;
+                uiDirty = true;
+            } else {
+                // ALARM: wznowienie radia
+                if (activeIdx >= 0 && canAttemptConnection()) {
+                    int sIdx = getBestStreamForStation(activeIdx);
+                    AudioCommand cmd;
+                    cmd.type = AUDIO_CMD_CONNECT;
+                    strncpy(cmd.data.url, cfg_stations[activeIdx].streams[sIdx].url, 255);
+                    cmd.data.url[255] = '\0';
+                    xQueueSend(audioQueue, &cmd, 0);
+                }
+                // Przełącz na radio
+                currentMode = MODE_RADIO;
+                uiDirty = true;
+            }
+        }
+        lastTimerTick = now;
     }
 
     // Specjalna logika dla pierwszego pobrania pogody po starcie
@@ -986,12 +1048,14 @@ void loop() {
     static unsigned long lastEncButtonTime = 0;
     bool encButton = stableDigitalRead(ENC1_PIN_KEY, 5, 200);
 
-    // GUARD: jeśli w ostatnich 30ms był obrót ENC2, zignoruj ENC1_BUTTON (crosstalk przez VCC)
-    if (encButton == LOW && lastEncButton == HIGH && (now - lastEncButtonTime) > 300) {
-        // Cykl: WEATHER → RADIO → CLOCK → WEATHER...
+    // GUARD: jeśli ENC2 jest przytrzymany, zablokuj ENC1_BUTTON (zapobiega zmianie trybu)
+    if (encButton == LOW && lastEncButton == HIGH && (now - lastEncButtonTime) > 300 && digitalRead(ENC2_PIN_KEY) == HIGH) {
+        // Cykl: WEATHER → RADIO → CLOCK → TIMER → WEATHER...
         AppMode oldMode = currentMode;
         if (currentMode == MODE_WEATHER) currentMode = MODE_RADIO;
         else if (currentMode == MODE_RADIO) currentMode = MODE_CLOCK;
+        else if (currentMode == MODE_CLOCK) currentMode = MODE_TIMER;
+        else if (currentMode == MODE_TIMER) currentMode = MODE_WEATHER;
         else currentMode = MODE_WEATHER;
         
         if(oldMode == MODE_WEATHER && currentMode == MODE_RADIO) {
@@ -1069,9 +1133,12 @@ void loop() {
             while (steps > 0) {
                 if (currentMode == MODE_RADIO) {
                     int newIdx = activeIdx + 1;
-                    if (newIdx >= TOTAL_STATIONS) newIdx = 0;
+                    if (newIdx >= cfg_station_count) newIdx = 0;
                     activeIdx = newIdx;
                     ensureActiveStationVisible();
+                } else if (currentMode == MODE_TIMER) {
+                    // TIMER: zmiana wartości (minut lub godzin/minut)
+                    handleTimerEncoder(1);
                 } else if (currentMode == MODE_WEATHER || currentMode == MODE_CLOCK) {
                     // Zwiększ jasność logarytmicznie (jak ikona +)
                     int newBr = (int)(brightness * 1.2);
@@ -1091,9 +1158,12 @@ void loop() {
             while (steps > 0) {
                 if (currentMode == MODE_RADIO) {
                     int newIdx = activeIdx - 1;
-                    if (newIdx < 0) newIdx = TOTAL_STATIONS - 1;
+                    if (newIdx < 0) newIdx = cfg_station_count - 1;
                     activeIdx = newIdx;
                     ensureActiveStationVisible();
+                } else if (currentMode == MODE_TIMER) {
+                    // TIMER: zmiana wartości (minut lub godzin/minut)
+                    handleTimerEncoder(-1);
                 } else if (currentMode == MODE_WEATHER || currentMode == MODE_CLOCK) {
                     // Zmniejsz jasność logarytmicznie (jak ikona -)
                     int newBr = (int)(brightness * 0.8);
@@ -1125,9 +1195,26 @@ void loop() {
     }
 
     if (navEncButton == LOW && navEncButtonHeld && !navEncLongPressHandled) {
-        // Sprawdź czy to długie wciśnięcie (>= 400ms)
-        if (now - navEncPressTime >= 400) {
-            // Długie wciśnięcie - zmiana trybu
+        unsigned long pressTime = now - navEncPressTime;
+        
+        // MODE_CLOCK: 10s przytrzymania → tryb AP
+        if (currentMode == MODE_CLOCK && pressTime >= AP_HOLD_ENTER_MS) {
+            startAP();
+            currentMode = MODE_AP;
+            navEncLongPressHandled = true;
+            uiDirty = true;
+            logEncEvent("[CORE1][ENC2_BUTTON] AP ENTER %lu ms\n", pressTime);
+        }
+        // MODE_AP: 5s przytrzymania → wyjście z AP
+        else if (currentMode == MODE_AP && pressTime >= AP_HOLD_EXIT_MS) {
+            stopAP();
+            currentMode = MODE_CLOCK;
+            navEncLongPressHandled = true;
+            uiDirty = true;
+            logEncEvent("[CORE1][ENC2_BUTTON] AP EXIT %lu ms\n", pressTime);
+        }
+        // Inne tryby: standardowe długie wciśnięcie (>= 400ms)
+        else if (currentMode != MODE_AP && currentMode != MODE_CLOCK && currentMode != MODE_TIMER && pressTime >= 400) {
             AppMode oldMode = currentMode;
             currentMode = (currentMode == MODE_WEATHER) ? MODE_RADIO : MODE_WEATHER;
             
@@ -1137,7 +1224,17 @@ void loop() {
             
             navEncLongPressHandled = true;
             uiDirty = true;
-            logEncEvent("[CORE1][ENC2_BUTTON] LONG PRESS dur:%lu ms\n", now - navEncPressTime);
+            logEncEvent("[CORE1][ENC2_BUTTON] LONG PRESS dur:%lu ms\n", pressTime);
+        }
+        // MODE_TIMER: długie przytrzymanie → przełącz SLEEP/ALARM
+        else if (currentMode == MODE_TIMER && pressTime >= 400) {
+            currentTimerMode = (currentTimerMode == TIMER_MODE_SLEEP) ? TIMER_MODE_ALARM : TIMER_MODE_SLEEP;
+            timerActive = false;
+            timerRemainingSeconds = 0;
+            navEncLongPressHandled = true;
+            uiDirty = true;
+            logEncEvent("[CORE1][ENC2_BUTTON] TIMER MODE SWITCH to %s\n", 
+                        currentTimerMode == TIMER_MODE_SLEEP ? "SLEEP" : "ALARM");
         }
     }
 
@@ -1153,6 +1250,33 @@ void loop() {
                             uiDirty = true;
                         }
                     }
+                } else if (currentMode == MODE_TIMER) {
+                    // MODE_TIMER: przełącz START/STOP
+                    if (timerActive.load()) {
+                        timerActive = false;
+                        timerRemainingSeconds = 0;
+                    } else {
+                        if (currentTimerMode == TIMER_MODE_SLEEP) {
+                            if (timerMinutes > 0) {
+                                timerActive = true;
+                                timerRemainingSeconds = timerMinutes * 60;
+                            }
+                        } else {
+                            // ALARM: ustaw timer do wznowienia radia
+                            struct tm ti;
+                            if (getLocalTime(&ti)) {
+                                int currentMinutes = ti.tm_hour * 60 + ti.tm_min;
+                                int alarmMinutes = alarmHour * 60 + alarmMinute;
+                                if (alarmMinutes > currentMinutes) {
+                                    timerRemainingSeconds = (alarmMinutes - currentMinutes) * 60;
+                                } else {
+                                    timerRemainingSeconds = ((24 * 60 - currentMinutes) + alarmMinutes) * 60;
+                                }
+                                timerActive = true;
+                            }
+                        }
+                    }
+                    uiDirty = true;
                 } else {
                     // MODE_WEATHER: reset widoku do "teraz"
                     // TODO: reset weather time offset
@@ -1165,6 +1289,9 @@ void loop() {
         navEncLongPressHandled = false;
     }
     lastNavEncButton = navEncButton;
+
+    // Obsługa serwera WWW w trybie AP
+    handleAPLoop();
 
     // Krótki yield dla systemu - kluczowe dla stabilności Core 1
     esp_task_wdt_reset(); // Reset WDT przed vTaskDelay

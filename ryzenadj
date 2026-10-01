@@ -1,0 +1,53 @@
+
+
+
+[Unit]
+Description=RyzenAdj Power + Undervolt
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'while true; do \
+  if [ "$(cat /sys/class/power_supply/AC/online)" -eq 1 ]; then \
+    /usr/bin/ryzenadj \
+        --stapm-limit=14000 \
+        --slow-limit=25000 \
+        --fast-limit=35000 \
+        --slow-time=15 \
+        --stapm-time=300 \
+        --tctl-temp=80 \
+        --apu-skin-temp=53 \
+        --set-coall=0xFFFF6 \
+      >/dev/null 2>&1; \
+  fi; \
+  sleep 10; \
+done'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+
+[Unit]
+Description=RyzenAdj Power Limit 14W (Silent AC Profile)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'while true; do \
+  if [ "$(cat /sys/class/power_supply/AC/online 2>/dev/null)" -eq 1 ]; then \
+    /usr/bin/ryzenadj \
+      --fast-limit=30000 \
+      --stapm-limit=14000 \
+      --slow-limit=18000 \
+      --tctl-temp=90 \
+      --apu-skin-temp=53 \
+      >/dev/null 2>&1; \
+  fi; \ 
+  sleep 100; \
+done'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+

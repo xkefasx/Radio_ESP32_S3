@@ -46,7 +46,7 @@ int cfg_station_count = 0;
 static const RadioStation DEFAULT_STATIONS[] = {
     {"RMF FM",      {{"http://stream11.radiostream.pl/tuba1-1.mp3",    Q_HQ, "192 MP3"}}, 1, true},
     {"Radio ZET",   {{"http://stream11.radiostream.pl/tuba2-1.mp3",    Q_HQ, "224 MP3"}}, 1, true},
-    {"Radio 357",   {{"http://stream.radio357.pl/m3u8",   Q_HQ, "224 AAC"}}, 1, true},
+    {"Radio 357",   {{"https://n-11-26.dcs.redcdn.pl/sc/o2/radio357/live/radio357_pr.livx?preroll=0 ",   Q_HQ, "192 MP3"}}, 1, true},
     {"Złote Przeboje", {{"http://stream11.radiostream.pl/tuba3-1.mp3", Q_HQ, "192 MP3"}}, 1, true},
     {"Antyradio",   {{"http://an01.cdn.eurozet.pl/ant-waw.mp3",    Q_HQ, "128 MP3"}}, 1, true},
     {"TOK FM",      {{"http://stream30.radiostream.pl/tuba10-1.mp3",   Q_MQ, "128 MP3"}}, 1, true},
@@ -73,33 +73,12 @@ static void applyDefaultStations() {
     }
 }
 
-// ===== Ładowanie konfiguracji z NVS =====
+// ===== Ładowanie konfiguracji z NVS (tylko głośność) =====
 inline void loadConfig() {
     Preferences prefs;
     prefs.begin(PREF_NAMESPACE, true); // read-only
 
-    // Sprawdź czy NVS zawiera jakieś dane (sprawdzając station_cnt)
-    bool hasData = prefs.isKey(PREF_STATION_CNT);
-    
-    // WiFi - jeśli brak w NVS, użyj domyślnych
-    if (prefs.isKey(PREF_WIFI_SSID)) {
-        String ssid = prefs.getString(PREF_WIFI_SSID, DEFAULT_WIFI_SSID);
-        strncpy(cfg_wifi_ssid, ssid.c_str(), 63);
-        cfg_wifi_ssid[63] = '\0';
-    } else {
-        strncpy(cfg_wifi_ssid, DEFAULT_WIFI_SSID, 63);
-        cfg_wifi_ssid[63] = '\0';
-    }
-    if (prefs.isKey(PREF_WIFI_PASS)) {
-        String pass = prefs.getString(PREF_WIFI_PASS, DEFAULT_WIFI_PASS);
-        strncpy(cfg_wifi_pass, pass.c_str(), 63);
-        cfg_wifi_pass[63] = '\0';
-    } else {
-        strncpy(cfg_wifi_pass, DEFAULT_WIFI_PASS, 63);
-        cfg_wifi_pass[63] = '\0';
-    }
-
-    // Volume
+    // Volume - tylko to ładujemy z NVS
     if (prefs.isKey(PREF_VOLUME)) {
         cfg_volume = prefs.getInt(PREF_VOLUME, DEFAULT_VOLUME);
     } else {
@@ -108,55 +87,8 @@ inline void loadConfig() {
     if (cfg_volume < 0) cfg_volume = 0;
     if (cfg_volume > 21) cfg_volume = 21;
 
-    // Station count
-    if (hasData) {
-        cfg_station_count = prefs.getInt(PREF_STATION_CNT, DEFAULT_STATION_COUNT);
-    } else {
-        cfg_station_count = 0;
-    }
-    
-    if (cfg_station_count <= 0 || cfg_station_count > MAX_STATIONS) {
-        // Brak stacji w NVS - użyj domyślnych (bez logowania błędów)
-        prefs.end();
-        applyDefaultStations();
-        info("CFG", "Using default stations (" + String(DEFAULT_STATION_COUNT) + ")");
-        return;
-    }
-
-    // Wczytaj stacje z NVS (tylko jeśli istnieją w NVS)
-    for (int i = 0; i < cfg_station_count && i < MAX_STATIONS; i++) {
-        String key_prefix = "s" + String(i) + "_";
-        
-        if (!prefs.isKey((key_prefix + "name").c_str())) {
-            // Brak danych stacji - użyj domyślnych
-            prefs.end();
-            applyDefaultStations();
-            info("CFG", "Station " + String(i) + " missing, using defaults");
-            return;
-        }
-        
-        String name = prefs.getString((key_prefix + "name").c_str(), "");
-        strncpy(cfg_stations[i].name, name.c_str(), 63);
-        cfg_stations[i].name[63] = '\0';
-        cfg_stations[i].streamCount = prefs.getInt((key_prefix + "scnt").c_str(), 1);
-        cfg_stations[i].isTuba = prefs.getBool((key_prefix + "tuba").c_str(), false);
-        
-        for (int j = 0; j < cfg_stations[i].streamCount && j < 3; j++) {
-            String skey = key_prefix + "s" + String(j) + "_";
-            if (prefs.isKey((skey + "url").c_str())) {
-                String url = prefs.getString((skey + "url").c_str(), "");
-                strncpy(cfg_stations[i].streams[j].url, url.c_str(), 255);
-                cfg_stations[i].streams[j].url[255] = '\0';
-            }
-            cfg_stations[i].streams[j].quality = (StreamQuality)prefs.getInt((skey + "q").c_str(), Q_MQ);
-            String label = prefs.getString((skey + "lbl").c_str(), "");
-            strncpy(cfg_stations[i].streams[j].label, label.c_str(), 31);
-            cfg_stations[i].streams[j].label[31] = '\0';
-        }
-    }
-
     prefs.end();
-    info("CFG", "Config loaded: " + String(cfg_station_count) + " stations, vol=" + String(cfg_volume));
+    info("CFG", "Volume loaded from NVS: " + String(cfg_volume));
 }
 
 // ===== Zapis całej konfiguracji =====

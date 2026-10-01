@@ -51,7 +51,10 @@ const char* WIFI_PASS = "XT7SUqGt";
 #define ENC2_PIN_KEY     48
 
 // ===== Tryby aplikacji =====
-enum AppMode { MODE_WEATHER, MODE_RADIO, MODE_CLOCK };
+enum AppMode { MODE_WEATHER, MODE_RADIO, MODE_CLOCK, MODE_TIMER, MODE_AP };
+
+// ===== Tryby timera =====
+enum TimerMode { TIMER_MODE_SLEEP, TIMER_MODE_ALARM };
 
 // ===== Kolejka komend audio (thread-safety Core1→Core0) =====
 enum AudioCmdType { AUDIO_CMD_CONNECT, AUDIO_CMD_STOP, AUDIO_CMD_VOLUME };
