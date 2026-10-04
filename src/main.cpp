@@ -1,17 +1,23 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#ifndef WOKWI_SIMULATION
 #include <WiFi.h>
+#endif
 #include <XPT2046_Touchscreen.h>
+#ifndef WOKWI_SIMULATION
 #include <Audio.h>
+#endif
 #include <Preferences.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include <esp_task_wdt.h>
 #include "config.h"
+#ifndef WOKWI_SIMULATION
 #include "wifi_logic.h"
 #include "radio_logic.h"
 #include "weather_logic.h"
+#endif
 #include "clock_screen.h"
 #include "timer_logic.h"
 #include "logger.h"
@@ -21,7 +27,9 @@
 void setupAudio();
 
 // Obiekty
+#ifndef WOKWI_SIMULATION
 Audio audio;
+#endif
 XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO);
 Arduino_GFX *display = new Arduino_ILI9341(bus, TFT_RST, 1, false);
@@ -60,15 +68,16 @@ uint32_t getAudioBufferFree() { return audioBufferFree.load(); }
 uint32_t getAudioBitrate() { return audioBitrate.load(); }
 
 void beep(uint16_t freq, uint16_t ms) {
+#ifndef WOKWI_SIMULATION
     ledcSetup(1, freq, 8);
     ledcAttachPin(I2S_BCLK, 1);
     ledcWrite(1, 128);
 
     pinMode(I2S_DOUT, OUTPUT);
     digitalWrite(I2S_DOUT, HIGH);
-    
+
     delay(ms);
-    
+
     digitalWrite(I2S_DOUT, LOW);
     ledcWrite(1, 0);
     ledcDetachPin(I2S_BCLK);
@@ -77,13 +86,20 @@ void beep(uint16_t freq, uint16_t ms) {
     pinMode(I2S_DOUT, INPUT);
     pinMode(I2S_BCLK, INPUT);
     pinMode(I2S_LRC, INPUT);
-    
+
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+#endif
 }
 
 // Akcesory dla WiFi (Rdzeń 1)
+#ifndef WOKWI_SIMULATION
 int getWiFiRSSI() { return WiFi.RSSI(); }
 String getWiFiIP() { return WiFi.localIP().toString(); }
+#else
+int getWiFiRSSI() { return -100; }
+String getWiFiIP() { return "No WiFi (simulation)"; }
+bool isConnected() { return false; }
+#endif
 
 static uint32_t hashUrl(const char* s) {
     uint32_t hash = 2166136261u;
@@ -507,15 +523,18 @@ void setup() {
     info("CFG", "Config loaded: vol=" + String(currentVolume) + ", stations=" + String(cfg_station_count));
 
     // 4. Inicjalizacja kolejki audio
+#ifndef WOKWI_SIMULATION
     audioQueue = xQueueCreate(8, sizeof(AudioCommand));
-    
+
     // 5. WiFi - audio inicjalizujemy dopiero w AudioLoopTask przy pierwszym CONNECT
     setupWiFi();
+#endif
 
     // Show log screen during startup
     drawLogScreen(canvas);
     canvas->flush();
 
+#ifndef WOKWI_SIMULATION
     // Reset WDT po setupWiFi() - zapobiega crash jeśli WiFi timeout
     esp_task_wdt_reset();
 
@@ -526,29 +545,34 @@ void setup() {
             lastWeatherUpdate = millis(); // Ustaw timer po pierwszym pobraniu - zapobiega spamowi co 7s
         }
     }
+#endif
 
     // 5. KLUCZOWE: Opóźnienie przed startem drugiego rdzenia
     info("SYS", "Waiting for core stability...");
     delay(1000);
 
+#ifndef WOKWI_SIMULATION
     xTaskCreatePinnedToCore(
-        AudioLoopTask, 
-        "AudioTask", 
+        AudioLoopTask,
+        "AudioTask",
         40960,      // 40KB stosu - wymagane dla biblioteki audio
-        NULL, 
+        NULL,
         5,          // Wyższy priorytet dla stabilnego audio streaming
-        &AudioTask, 
+        &AudioTask,
         0           // Rdzeń 0
     );
-    
+
     // ✅ Wysyłamy zapamiętaną głośność do audio task zaraz po starcie
     AudioCommand initVolumeCmd;
     initVolumeCmd.type = AUDIO_CMD_VOLUME;
     initVolumeCmd.data.volume = currentVolume;
     xQueueSend(audioQueue, &initVolumeCmd, 0);
     info("SYS", "Initial volume sent: " + String(currentVolume));
-    
+
     info("SYS", "Setup Finished. Audio Task on Core 0");
+#else
+    info("SYS", "Audio Task skipped (Wokwi simulation)");
+#endif
 
     info("SYS", "WDT active on both cores");
 }
@@ -955,11 +979,15 @@ void loop() {
     // Renderowanie
     if (uiDirty || (now - lastUiRender >= UI_FRAME_MS)) {
         if (currentMode == MODE_WEATHER) {
+#ifndef WOKWI_SIMULATION
             if (weatherLoaded) {
                 drawWeatherUI(canvas, brightness, currentVolume);
             } else {
                 drawLogScreen(canvas);
             }
+#else
+            drawLogScreen(canvas);
+#endif
         } else if (currentMode == MODE_CLOCK) {
             drawClockUI(canvas, brightness, currentVolume, currAudioPlaying, currConnecting);
         } else if (currentMode == MODE_TIMER) {
@@ -967,7 +995,12 @@ void loop() {
         } else if (currentMode == MODE_AP) {
             drawAPScreen(canvas);
         } else {
+#ifndef WOKWI_SIMULATION
             drawRadioUI(canvas, currentVolume, brightness, currAudioPlaying, currConnecting);
+#else
+            // W symulacji pokaż ekran logów zamiast radio
+            drawLogScreen(canvas);
+#endif
         }
         canvas->flush();
         lastUiRender = now;
@@ -1018,8 +1051,9 @@ void loop() {
     }
 
     // Specjalna logika dla pierwszego pobrania pogody po starcie
+#ifndef WOKWI_SIMULATION
     const unsigned long updateInterval = weatherLoaded ? 60000 : 2000;
-    
+
     if (millis() - lastWeatherUpdate > updateInterval) {
         if (isConnected()) {
             esp_task_wdt_reset(); // Reset WDT przed updateWeather()
@@ -1033,6 +1067,7 @@ void loop() {
             lastWeatherUpdate = millis() - 58000;
         }
     }
+#endif
 
     trackCPUEnd();
 

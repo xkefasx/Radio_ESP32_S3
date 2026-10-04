@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "author": "Piotr Ratajczyk",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": { "psramType": "octal" }
+    },
+    {
+      "type": "wokwi-ili9341",
+      "id": "display",
+      "top": -260,
+      "left": 220
+    },
+    {
+      "type": "wokwi-ky-040",
+      "id": "enc1",
+      "top": 120,
+      "left": 220
+    },
+    {
+      "type": "wokwi-ky-040",
+      "id": "enc2",
+      "top": 280,
+      "left": 220
+    },
+    {
+      "type": "wokwi-max98357a",
+      "id": "i2s_dac",
+      "top": -80,
+      "left": 220
+    }
+  ],
+  "connections": [
+    [ "$serialMonitor:RX", "esp:TX", "", [] ],
+    [ "$serialMonitor:TX", "esp:RX", "", [] ],
+
+    [ "esp:GND.1", "display:GND", "black", [] ],
+    [ "esp:3V3.1", "display:VCC", "red", [] ],
+    [ "esp:4", "display:LED", "orange", [] ],
+    [ "esp:9", "display:RESET", "grey", [] ],
+    [ "esp:10", "display:CS", "purple", [] ],
+    [ "esp:11", "display:MOSI", "blue", [] ],
+    [ "esp:12", "display:SCK", "yellow", [] ],
+    [ "esp:13", "display:MISO", "white", [] ],
+    [ "esp:14", "display:DC", "green", [] ],
+
+    [ "esp:5", "display:T_CS", "purple", [] ],
+    [ "esp:6", "display:T_IRQ", "brown", [] ],
+    [ "esp:11", "display:T_DIN", "blue", [] ],
+    [ "esp:13", "display:T_DO", "white", [] ],
+    [ "esp:12", "display:T_CLK", "yellow", [] ],
+
+    [ "esp:GND.2", "i2s_dac:GND", "black", [] ],
+    [ "esp:5VIN", "i2s_dac:VIN", "red", [] ],
+    [ "esp:15", "i2s_dac:LRC", "yellow", [] ],
+    [ "esp:16", "i2s_dac:BCLK", "orange", [] ],
+    [ "esp:17", "i2s_dac:DIN", "blue", [] ],
+
+    [ "esp:GND.3", "enc1:GND", "black", [] ],
+    [ "esp:3V3.2", "enc1:VCC", "red", [] ],
+    [ "esp:40", "enc1:CLK", "orange", [] ],
+    [ "esp:41", "enc1:DT", "green", [] ],
+    [ "esp:42", "enc1:SW", "purple", [] ],
+
+    [ "esp:GND.4", "enc2:GND", "black", [] ],
+    [ "esp:3V3.2", "enc2:VCC", "red", [] ],
+    [ "esp:38", "enc2:CLK", "orange", [] ],
+    [ "esp:39", "enc2:DT", "green", [] ],
+    [ "esp:48", "enc2:SW", "purple", [] ]
+  ]
+}
